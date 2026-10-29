@@ -9,10 +9,12 @@ dependencies = [
     "click>=8.5.0",
     "dishka>=1.10.1",
     "dishka-faststream>=0.7.0",
+    "fastapi>=0.162.0",
     "faststream[cli,rabbit]>=0.7",
     "httpx>=0.28.1",
     "pydantic-settings>=2.16.2",
     "sqlalchemy[asyncio]>=2.0",
+    "uvicorn[standard]>=0.54.0",
 ]
 
 [dependency-groups]
