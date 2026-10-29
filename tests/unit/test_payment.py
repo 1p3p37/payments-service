@@ -44,7 +44,7 @@ def test_quantize_amount(amount: str, expected: str):
         assert make_payment(currency="USD").currency is Currency.USD
 
     def test_unknown_currency(self):
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="not a valid Currency"):
             make_payment(currency="GBP")
 
     @pytest.mark.parametrize("amount", [Decimal("0"), Decimal("-1.00")])

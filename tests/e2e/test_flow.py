@@ -1,3 +1,4 @@
+from typing import Any
 from uuid import uuid4
 
 import httpx
@@ -21,7 +22,7 @@ async def create_payment(api: httpx.AsyncClient) -> str:
         },
     )
     assert response.status_code == 202, response.text
-    return response.json()["payment_id"]
+    return str(response.json()["payment_id"])
 
 
 async def test_payment_is_processed_and_client_notified(
@@ -29,13 +30,13 @@ async def test_payment_is_processed_and_client_notified(
 ):
     payment_id = await create_payment(api)
 
-    async def processed() -> dict | None:
+    async def processed() -> dict[str, Any] | None:
         payment = (await api.get(f"/api/v1/payments/{payment_id}")).json()
         return payment if payment["status"] != "pending" else None
 
     payment = await wait_until(processed, timeout=20, interval=0.5)
 
-    async def notified() -> dict | None:
+    async def notified() -> dict[str, Any] | None:
         received = (await mock.get("/received")).json()
         return next((r for r in received if r["event_id"] == payment_id), None)
 
@@ -49,7 +50,7 @@ async def test_undeliverable_webhook_ends_in_dlq(
     api: httpx.AsyncClient, mock: httpx.AsyncClient, rabbit: httpx.AsyncClient
 ):
     async def dlq_size() -> int:
-        return (await rabbit.get("/queues/%2F/payments.new.dlq")).json()["messages"]
+        return int((await rabbit.get("/queues/%2F/payments.new.dlq")).json()["messages"])
 
     before = await dlq_size()
     await mock.put("/config", json={"fail_rate": 1})

@@ -9,6 +9,7 @@ from app.domain.payment import Payment
 from app.infra.exceptions import WebhookDeliveryError
 from app.infra.webhook import WebhookSender
 from tests.factories import make_payment
+from tests.helpers import present
 
 URL = "http://client.test/hook"
 
@@ -39,7 +40,7 @@ async def test_sends_payload(sender: WebhookSender, payment: Payment):
         "status": "succeeded",
         "amount": "100.50",
         "currency": "RUB",
-        "processed_at": payment.processed_at.isoformat(),
+        "processed_at": present(payment.processed_at).isoformat(),
         "metadata": {"order": 1},
     }
 

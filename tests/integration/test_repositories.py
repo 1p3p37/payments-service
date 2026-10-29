@@ -8,12 +8,13 @@ from app.domain.payment import PaymentStatus
 from app.infra.exceptions import ConcurrentUpdateError
 from app.infra.models import OutboxModel, PaymentModel
 from tests.factories import make_payment
+from tests.helpers import present
 from tests.integration.conftest import RequestScope, ScopeFactory
 
 
 async def count(session_factory: async_sessionmaker[AsyncSession], model: type) -> int:
     async with session_factory() as session:
-        return await session.scalar(select(func.count()).select_from(model))
+        return (await session.execute(select(func.count()).select_from(model))).scalar_one()
 
 
 class TestPaymentRepositories:
@@ -23,7 +24,7 @@ class TestPaymentRepositories:
             assert await scope.payment_commands.add(payment)
 
         async with scope.uow:
-            loaded = await scope.payment_queries.get(payment.id)
+            loaded = present(await scope.payment_queries.get(payment.id))
             by_key = await scope.payment_queries.get_by_idempotency_key(payment.idempotency_key)
 
         assert loaded == by_key == payment
@@ -61,13 +62,13 @@ class TestPaymentRepositories:
             await scope.payment_commands.add(payment)
 
         async with scope.uow:
-            loaded = await scope.payment_queries.get(payment.id)
+            loaded = present(await scope.payment_queries.get(payment.id))
             loaded.mark_succeeded()
             await scope.payment_commands.update(loaded, "status", "processed_at")
         assert loaded.version == 1
 
         async with scope.uow:
-            stored = await scope.payment_queries.get(payment.id)
+            stored = present(await scope.payment_queries.get(payment.id))
         assert stored.status is PaymentStatus.SUCCEEDED
         assert stored.processed_at is not None
         assert stored.version == 1
@@ -80,9 +81,9 @@ class TestPaymentRepositories:
                 await a.payment_commands.add(payment)
 
             async with a.uow:
-                first = await a.payment_queries.get(payment.id)
+                first = present(await a.payment_queries.get(payment.id))
             async with b.uow:
-                second = await b.payment_queries.get(payment.id)
+                second = present(await b.payment_queries.get(payment.id))
 
             first.mark_succeeded()
             async with a.uow:
@@ -94,7 +95,7 @@ class TestPaymentRepositories:
                     await b.payment_commands.update(second, "status", "processed_at")
 
             async with b.uow:
-                stored = await b.payment_queries.get(payment.id)
+                stored = present(await b.payment_queries.get(payment.id))
         assert stored.status is PaymentStatus.SUCCEEDED
         assert stored.version == 1
 
@@ -110,17 +111,17 @@ class TestPaymentRepositories:
                 await a.payment_commands.add(payment)
 
             async with b.uow:
-                stale = await b.payment_queries.get(payment.id)
+                stale = present(await b.payment_queries.get(payment.id))
 
                 async with a.uow:
-                    first = await a.payment_queries.get(payment.id)
+                    first = present(await a.payment_queries.get(payment.id))
                     first.mark_succeeded()
                     await a.payment_commands.update(first, "status", "processed_at")
 
                 stale.mark_failed()
                 with pytest.raises(ConcurrentUpdateError):
                     await b.payment_commands.update(stale, "status", "processed_at")
-                fresh = await b.payment_queries.get(payment.id)
+                fresh = present(await b.payment_queries.get(payment.id))
 
         assert fresh.status is PaymentStatus.SUCCEEDED
         assert fresh.version == 1
@@ -128,7 +129,7 @@ class TestPaymentRepositories:
     @pytest.mark.parametrize("fields", [(), ("amount",), ("status", "metadata")])
     async def test_update_rejects_fields(self, scope: RequestScope, fields: tuple[str, ...]):
         async with scope.uow:
-            with pytest.raises(ValueError):
+            with pytest.raises(ValueError, match="non-empty subset"):
                 await scope.payment_commands.update(make_payment(), *fields)
 
 
@@ -212,7 +213,8 @@ class TestUnitOfWork:
         self, scope: RequestScope, session_factory: async_sessionmaker[AsyncSession]
     ):
         payment = make_payment()
-        with pytest.raises(RuntimeError):
+        # PT012: исключение намеренно внутри UoW — проверяем, что он откатывает всё
+        with pytest.raises(RuntimeError, match="boom"):  # noqa: PT012
             async with scope.uow:
                 await scope.payment_commands.add(payment)
                 await scope.outbox_commands.add_events(payment.pull_events())
@@ -236,7 +238,7 @@ class TestUnitOfWork:
         self, scope: RequestScope, session_factory: async_sessionmaker[AsyncSession]
     ):
         """Повторный `async with uow:` на той же сессии — новая транзакция."""
-        with pytest.raises(RuntimeError):
+        with pytest.raises(RuntimeError, match="boom"):  # noqa: PT012 — исключение внутри UoW
             async with scope.uow:
                 await scope.payment_commands.add(make_payment())
                 raise RuntimeError("boom")

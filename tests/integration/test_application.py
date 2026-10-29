@@ -1,12 +1,11 @@
 import asyncio
 import json
 from decimal import Decimal
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 import respx
 from dishka import AsyncContainer
-from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.application.commands.charge_payment import ChargePaymentCommand
@@ -16,17 +15,10 @@ from app.application.mediator import Mediator
 from app.application.queries.get_payment import GetPaymentQuery
 from app.domain.exceptions import IdempotencyKeyConflict, PaymentNotFound
 from app.domain.payment import Payment, PaymentStatus
-from app.infra.models import OutboxModel, PaymentModel
 from app.infra.repositories.queries.payment import PaymentQueryRepository
 from app.infra.uow import UnitOfWork
-from tests.integration.helpers import WEBHOOK_URL, create_command, send
-
-
-async def counts(session_factory: async_sessionmaker[AsyncSession]) -> tuple[int, int]:
-    async with session_factory() as session:
-        payments = await session.scalar(select(func.count()).select_from(PaymentModel))
-        outbox = await session.scalar(select(func.count()).select_from(OutboxModel))
-    return payments, outbox
+from tests.helpers import present
+from tests.integration.helpers import WEBHOOK_URL, counts, create_command, send
 
 
 class TestCreatePayment:
@@ -103,7 +95,9 @@ class TestCompletePayment:
         assert repeat.status is PaymentStatus.SUCCEEDED
         assert repeat.version == first.version == 1
 
-    async def test_concurrent_writer_wins(self, container: AsyncContainer):
+    async def test_concurrent_writer_wins(
+        self, container: AsyncContainer, monkeypatch: pytest.MonkeyPatch
+    ):
         """Сосед записал результат между нашим чтением и update."""
         created = await send(container, create_command())
 
@@ -114,13 +108,13 @@ class TestCompletePayment:
             queries = await request.get(PaymentQueryRepository)
             original_get = queries.get
 
-            async def get_then_neighbour_writes(payment_id):
-                payment = await original_get(payment_id)
+            async def get_then_neighbour_writes(payment_id: UUID) -> Payment | None:
+                payment = present(await original_get(payment_id))
                 if payment.is_pending:  # только первое чтение, перечитывание — без вмешательства
                     await send(container, CompletePaymentCommand(payment_id, succeeded=True))
                 return payment
 
-            queries.get = get_then_neighbour_writes
+            monkeypatch.setattr(queries, "get", get_then_neighbour_writes)
             async with uow:
                 result = await mediator.send(CompletePaymentCommand(created.id, succeeded=False))
 

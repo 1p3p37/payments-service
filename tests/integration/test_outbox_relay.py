@@ -1,7 +1,7 @@
 import asyncio
 import json
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import ClassVar, cast
 
 from aio_pika import DeliveryMode
 from dishka import AsyncContainer
@@ -16,6 +16,7 @@ from app.ioc import make_container
 from app.manage import outbox_loop, process_outbox
 from app.settings import Settings
 from tests.factories import make_payment
+from tests.helpers import present
 from tests.integration.conftest import InstantGatewayProvider, RequestScope
 from tests.integration.rabbit import wait_message
 
@@ -78,7 +79,7 @@ async def test_unroutable_message_is_counted_then_skipped(
     [row] = await outbox_rows(session_factory)
     assert row.id == poison.event_id
     assert row.attempts == 1
-    assert "PublishError" in row.last_error
+    assert "PublishError" in present(row.last_error)
 
     for _ in range(settings.OUTBOX_MAX_ATTEMPTS):
         await process_outbox(relay_container)
@@ -98,7 +99,9 @@ async def test_broker_down_does_not_count_attempts(
 ):
     [event] = make_payment().pull_events()
     await add_events(scope, event)
-    container = make_container(settings, InstantGatewayProvider(), broker=UnreachableBroker())
+    # подставной брокер с тем же publish — достаточно для PublishOutboxHandler
+    broker = cast(RabbitBroker, UnreachableBroker())
+    container = make_container(settings, InstantGatewayProvider(), broker=broker)
     try:
         for _ in range(settings.OUTBOX_MAX_ATTEMPTS + 1):
             assert await process_outbox(container) is False  # не продвинулись → пауза

@@ -6,6 +6,7 @@ Webhook перехватывает respx, шлюз — счётчик вызов
 import json
 import time
 from collections.abc import Iterator
+from typing import Any
 from uuid import uuid4
 
 import httpx
@@ -42,7 +43,7 @@ async def stored(container: AsyncContainer, payment: Payment) -> Payment:
     return await send(container, GetPaymentQuery(payment.id))
 
 
-def bodies(route: respx.Route) -> list[dict]:
+def bodies(route: respx.Route) -> list[dict[str, Any]]:
     return [json.loads(call.request.content) for call in route.calls]
 
 

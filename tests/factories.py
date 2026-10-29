@@ -1,11 +1,12 @@
 from decimal import Decimal
+from typing import Any
 from uuid import uuid4
 
 from app.domain.payment import Currency, Payment
 
 
-def make_payment(**overrides) -> Payment:
-    params = {
+def make_payment(**overrides: Any) -> Payment:
+    params: dict[str, Any] = {
         "amount": Decimal("100.50"),
         "currency": Currency.RUB,
         "description": "Order #1",

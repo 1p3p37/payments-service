@@ -1,16 +1,16 @@
 import asyncio
 from collections.abc import AsyncIterator, Awaitable
+from typing import Any
 from uuid import uuid4
 
 import httpx
 import pytest
-from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app.api.main import create_app
-from app.infra.models import OutboxModel, PaymentModel
 from app.settings import Settings
 from tests.integration.conftest import InstantGatewayProvider
+from tests.integration.helpers import counts
 
 API_KEY = "test-key"
 URL = "/api/v1/payments"
@@ -36,20 +36,13 @@ async def client(settings: Settings, engine: AsyncEngine) -> AsyncIterator[httpx
         yield client
 
 
-def create(client: httpx.AsyncClient, key: str = "key-1", **body) -> Awaitable[httpx.Response]:
+def create(client: httpx.AsyncClient, key: str = "key-1", **body: Any) -> Awaitable[httpx.Response]:
     return client.post(URL, json=BODY | body, headers={"Idempotency-Key": key})
-
-
-async def counts(session_factory: async_sessionmaker[AsyncSession]) -> tuple[int, int]:
-    async with session_factory() as session:
-        payments = await session.scalar(select(func.count()).select_from(PaymentModel))
-        outbox = await session.scalar(select(func.count()).select_from(OutboxModel))
-    return payments, outbox
 
 
 class TestAuth:
     @pytest.mark.parametrize("headers", [{"X-API-Key": ""}, {"X-API-Key": "wrong"}])
-    async def test_wrong_key(self, client: httpx.AsyncClient, headers: dict):
+    async def test_wrong_key(self, client: httpx.AsyncClient, headers: dict[str, str]):
         response = await client.get(f"{URL}/{uuid4()}", headers=headers)
 
         assert response.status_code == 401
@@ -145,7 +138,7 @@ class TestCreatePayment:
             {"description": "x" * 256},
         ],
     )
-    async def test_invalid_body(self, client: httpx.AsyncClient, override: dict):
+    async def test_invalid_body(self, client: httpx.AsyncClient, override: dict[str, str]):
         response = await create(client, **override)
 
         assert response.status_code == 422
