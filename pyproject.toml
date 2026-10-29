@@ -1,0 +1,44 @@
+[project]
+name = "payments-service"
+version = "0.1.0"
+description = "Асинхронный сервис процессинга платежей"
+requires-python = ">=3.12"
+dependencies = [
+    "alembic>=1.20.1",
+    "asyncpg>=0.32.0",
+    "click>=8.5.0",
+    "dishka>=1.10.1",
+    "dishka-faststream>=0.7.0",
+    "faststream[rabbit]>=0.7",
+    "httpx>=0.28.1",
+    "pydantic-settings>=2.16.2",
+    "sqlalchemy[asyncio]>=2.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+    "pytest-asyncio>=1.4.1",
+    "respx>=0.23.1",
+    "ruff>=0.17.3",
+    "testcontainers[postgres,rabbitmq]>=4.15.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["*.md"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+# кириллица в строках и комментариях
+ignore = ["RUF001", "RUF002", "RUF003"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "integration: testcontainers, нужен Docker",
+    "e2e: требует поднятого docker compose",
+]
