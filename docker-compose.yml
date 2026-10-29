@@ -1,0 +1,89 @@
+x-app: &app
+  build: .
+  image: payments-service:latest
+  restart: unless-stopped
+  environment: &app-env
+    DB_URL: postgresql+asyncpg://payments:payments@postgres:5432/payments
+    RABBIT_URL: amqp://guest:guest@rabbitmq:5672/
+    API_KEY: ${API_KEY:-dev-api-key}
+    MAX_RETRIES: ${MAX_RETRIES:-3}
+    RETRY_BASE_DELAY: ${RETRY_BASE_DELAY:-1}
+    GATEWAY_SUCCESS_RATE: ${GATEWAY_SUCCESS_RATE:-0.9}
+    GATEWAY_MIN_DELAY: ${GATEWAY_MIN_DELAY:-2}
+    GATEWAY_MAX_DELAY: ${GATEWAY_MAX_DELAY:-5}
+    WEBHOOK_TIMEOUT: ${WEBHOOK_TIMEOUT:-5}
+  depends_on: &app-deps
+    postgres:
+      condition: service_healthy
+    rabbitmq:
+      condition: service_healthy
+    migrate:
+      condition: service_completed_successfully
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: payments
+      POSTGRES_PASSWORD: payments
+      POSTGRES_DB: payments
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U payments -d payments"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    ports:
+      - "${RABBITMQ_UI_PORT:-15672}:15672"  # UI: guest / guest
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      # ping проходит раньше, чем AMQP-порт принимает соединения — проверяем порт
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_port_connectivity"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+
+  migrate:
+    <<: *app
+    restart: "no"
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    <<: *app
+    command: ["uvicorn", "app.api.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "${API_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  consumer:
+    <<: *app
+    command: ["faststream", "run", "app.consumer.main:create_app", "--factory"]
+
+  outbox-relay:
+    <<: *app
+    command: ["python", "-m", "app.manage", "runoutbox"]
+
+  webhook-mock:
+    <<: *app
+    command: ["uvicorn", "app.dev.webhook_mock:app", "--host", "0.0.0.0", "--port", "8001"]
+    environment:
+      WEBHOOK_FAIL_RATE: ${WEBHOOK_FAIL_RATE:-0}
+    depends_on: []
+    ports:
+      - "${WEBHOOK_MOCK_PORT:-8001}:8001"
+
+volumes:
+  postgres-data:
+  rabbitmq-data:
