@@ -56,7 +56,11 @@ class CreatePaymentHandler:
             # гонка двух одинаковых запросов: ON CONFLICT дождался коммита соседа,
             # его строка уже видна (READ COMMITTED)
             existing = await self._find_existing(command.idempotency_key, request_hash)
-            assert existing is not None
+            if existing is None:  # конфликт по ключу, но строки нет — нарушен инвариант БД
+                raise RuntimeError(
+                    f"Payment with idempotency key {command.idempotency_key!r} "
+                    "conflicted on insert but was not found"
+                )
             return existing
 
         # в той же транзакции, что и платёж (outbox pattern)
