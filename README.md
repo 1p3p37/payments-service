@@ -244,6 +244,22 @@ python -m app.manage runoutbox
 
 ## Разработка и тесты
 
+Частые команды собраны в `Makefile` (`make` или `make help` — список):
+
+```bash
+make env          # что определилось: ОС, shell, uv / .venv, docker compose v2 / v1, Docker
+make install      # uv sync
+make check        # lint + typecheck + test — всё перед коммитом
+make up           # собрать и запустить стек;  make down / make clean (с удалением данных)
+make test-e2e     # e2e на поднятом стеке
+make logs EXTRA="consumer"
+make create-migration EXTRA="add_index" REV=0003
+```
+
+Makefile работает на macOS и Linux: совместим со штатным GNU make 3.81 на macOS, рецепты на POSIX sh (работают и в bash, и в `dash`, который `/bin/sh` на Debian/Ubuntu). Python берётся из uv, а без него — из локального `.venv`; Compose — плагин `docker compose` или старый `docker-compose`.
+
+То же без make:
+
 ```bash
 uv sync
 uv run ruff check . && uv run ruff format --check .
