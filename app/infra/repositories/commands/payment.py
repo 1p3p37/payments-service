@@ -4,9 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.payment import Payment
 from app.infra.exceptions import ConcurrentUpdateError
-from app.infra.models import PaymentModel
-
-payments_table = PaymentModel.__table__
+from app.infra.models import PaymentModel, payments_table
 
 
 class PaymentCommandRepository:

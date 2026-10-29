@@ -44,7 +44,8 @@ class RetryMiddleware(BaseMiddleware):
 
     @property
     def broker(self) -> RabbitBroker:
-        return self.context.get("broker")
+        broker: RabbitBroker = self.context.get("broker")  # контекст FastStream не типизирован
+        return broker
 
     @property
     def max_retries(self) -> int:

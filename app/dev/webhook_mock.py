@@ -9,6 +9,7 @@
 import logging
 import os
 import random
+from dataclasses import dataclass, field
 from typing import Any
 
 from fastapi import FastAPI, Header, Request, Response, status
@@ -18,10 +19,15 @@ logger = logging.getLogger("webhook_mock")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
 app = FastAPI(title="Webhook mock")
-state: dict[str, Any] = {
-    "fail_rate": float(os.getenv("WEBHOOK_FAIL_RATE", "0")),
-    "received": [],
-}
+
+
+@dataclass
+class State:
+    fail_rate: float
+    received: list[dict[str, Any]] = field(default_factory=list)
+
+
+state = State(fail_rate=float(os.getenv("WEBHOOK_FAIL_RATE", "0")))
 
 
 class Config(BaseModel):
@@ -31,24 +37,24 @@ class Config(BaseModel):
 @app.post("/hook")
 async def hook(request: Request, x_event_id: str = Header("")) -> Response:
     payload = await request.json()
-    if random.random() < state["fail_rate"]:
+    if random.random() < state.fail_rate:  # noqa: S311 — имитация сбоев, не криптография
         logger.warning("FAIL  %s %s", x_event_id, payload.get("status"))
         return Response(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    duplicate = any(r["event_id"] == x_event_id for r in state["received"])
-    state["received"].append({"event_id": x_event_id, "duplicate": duplicate, "payload": payload})
+    duplicate = any(r["event_id"] == x_event_id for r in state.received)
+    state.received.append({"event_id": x_event_id, "duplicate": duplicate, "payload": payload})
     logger.info("OK    %s %s%s", x_event_id, payload.get("status"), " (duplicate)" * duplicate)
     return Response(status_code=status.HTTP_200_OK)
 
 
 @app.get("/received")
 async def received() -> list[dict[str, Any]]:
-    return state["received"]
+    return state.received
 
 
 @app.put("/config")
 async def configure(config: Config) -> Config:
-    state["fail_rate"] = config.fail_rate
+    state.fail_rate = config.fail_rate
     logger.info("fail_rate = %s", config.fail_rate)
     return config
 

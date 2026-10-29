@@ -7,9 +7,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.base import BaseEvent
-from app.infra.models import OutboxModel
-
-outbox_table = OutboxModel.__table__
+from app.infra.models import OutboxModel, outbox_table
 
 
 class OutboxCommandRepository:

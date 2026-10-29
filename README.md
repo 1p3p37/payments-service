@@ -247,6 +247,7 @@ python -m app.manage runoutbox
 ```bash
 uv sync
 uv run ruff check . && uv run ruff format --check .
+uv run mypy                   # strict для app/, в tests/ не требуются аннотации функций
 uv run pytest                 # unit + integration; e2e пропускаются, если стек не поднят
 docker compose up -d && uv run pytest -m e2e    # e2e на поднятом окружении
 ```

@@ -19,6 +19,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "mypy>=2.4.1",
     "pytest>=9.2.0",
     "pytest-asyncio>=1.4.1",
     "respx>=0.23.1",
@@ -32,9 +33,25 @@ target-version = "py312"
 extend-exclude = ["*.md"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "ASYNC", "S", "DTZ", "PT"]
 # кириллица в строках и комментариях
 ignore = ["RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.lint.per-file-ignores]
+# S101: assert — штатный способ проверок в pytest;
+# ASYNC109: хелперы опроса (wait_until, wait_message) принимают дедлайн, а не оборачивают await
+"tests/**" = ["S101", "ASYNC109"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+packages = ["app", "tests"]
+
+[[tool.mypy.overrides]]
+# в тестах не требуем аннотаций у тестовых функций и фикстур; остальные проверки strict
+module = ["tests.*"]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

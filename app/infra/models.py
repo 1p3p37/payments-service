@@ -1,9 +1,9 @@
 from datetime import datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
-from sqlalchemy import TIMESTAMP, BigInteger, Numeric
+from sqlalchemy import TIMESTAMP, BigInteger, Numeric, Table
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -58,3 +58,9 @@ class OutboxModel(Base):
     # отказы брокера по этому сообщению; при OUTBOX_MAX_ATTEMPTS relay его пропускает
     attempts: Mapped[int]
     last_error: Mapped[str | None]
+
+
+# Core-таблицы для запросов с ключами-колонками (`metadata`, а не атрибут `metadata_`);
+# Declarative типизирует `__table__` как FromClause, на деле это Table
+payments_table = cast(Table, PaymentModel.__table__)
+outbox_table = cast(Table, OutboxModel.__table__)

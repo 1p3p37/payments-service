@@ -23,6 +23,7 @@ class PaymentGateway:
         self.max_delay = max_delay
 
     async def charge(self, payment_id: UUID, amount: Decimal, currency: Currency) -> bool:
-        await asyncio.sleep(random.uniform(self.min_delay, self.max_delay))
+        # эмуляция задержки, не криптография
+        await asyncio.sleep(random.uniform(self.min_delay, self.max_delay))  # noqa: S311
         digest = hashlib.blake2b(payment_id.bytes, digest_size=8).digest()
         return int.from_bytes(digest) % _BUCKETS < self.success_rate * _BUCKETS

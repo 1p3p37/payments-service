@@ -1,5 +1,5 @@
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, cast
 
 from dishka import AsyncContainer
 
@@ -34,16 +34,18 @@ class Mediator:
         self._container = container
         self._handlers = handlers
 
+    # Тип результата задаёт команда (`Command[R]`); связь «команда → хендлер» живёт в
+    # реестре во время выполнения, поэтому здесь — единственный cast на границе.
     async def send[R](self, command: Command[R]) -> R:
-        return await self._dispatch(command)
+        return cast(R, await self._dispatch(command))
 
     async def query[R](self, query: Query[R]) -> R:
-        return await self._dispatch(query)
+        return cast(R, await self._dispatch(query))
 
-    async def _dispatch(self, request: Any) -> Any:
+    async def _dispatch(self, request: object) -> object:
         try:
             handler_type = self._handlers[type(request)]
         except KeyError:
             raise HandlerNotRegistered(type(request)) from None
-        handler = await self._container.get(handler_type)
+        handler: Any = await self._container.get(handler_type)
         return await handler.handle(request)

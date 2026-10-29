@@ -17,6 +17,7 @@ class PaymentQueryRepository:
     async def get_by_idempotency_key(self, key: str) -> Payment | None:
         return await self._one(select(PaymentModel).where(PaymentModel.idempotency_key == key))
 
-    async def _one(self, stmt: Select[tuple[PaymentModel]]) -> Payment | None:
+    # SQLAlchemy 2.1: Select параметризуется типами колонок (не tuple, как в 2.0)
+    async def _one(self, stmt: Select[PaymentModel]) -> Payment | None:
         model = (await self.session.execute(stmt)).scalar_one_or_none()
         return model.to_entity() if model else None

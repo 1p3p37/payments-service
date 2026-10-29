@@ -15,7 +15,9 @@ class BaseEvent:
         """JSON-сериализуемый payload события. event_id уходит отдельно (outbox.id / message_id)."""
         data = asdict(self)
         data.pop("event_id")
-        return json.loads(json.dumps(data, default=str))
+        # round-trip через JSON: UUID / Decimal / datetime → строки
+        payload: dict[str, Any] = json.loads(json.dumps(data, default=str))
+        return payload
 
 
 @dataclass(eq=False)

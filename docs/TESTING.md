@@ -6,7 +6,8 @@
 
 ```bash
 uv sync
-uv run ruff check . && uv run ruff format --check .
+uv run ruff check . && uv run ruff format --check .   # + ASYNC, S (bandit), DTZ, PT
+uv run mypy                      # strict; в tests/ ослаблены только требования к аннотациям
 uv run pytest                    # unit + integration; e2e пропускаются без поднятого стека
 docker compose up -d && uv run pytest -m e2e
 ```
