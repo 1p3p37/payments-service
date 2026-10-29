@@ -4,6 +4,8 @@
 
 **Стек:** FastAPI · Pydantic v2 · SQLAlchemy 2 (async) · PostgreSQL · RabbitMQ (FastStream 0.7) · Alembic · dishka · Docker
 
+**Документация:** [архитектура](docs/ARCHITECTURE.md) — компоненты, потоки, гарантии, отказы, решения · [тестирование](docs/TESTING.md) — автотесты, ручные сценарии, внесение отказов
+
 ## Запуск
 
 ```bash
