@@ -12,8 +12,11 @@ from faststream import BaseMiddleware
 from faststream.exceptions import NackMessage, RejectMessage
 from faststream.message import StreamMessage
 from faststream.rabbit import RabbitBroker
+from pydantic import ValidationError
 
+from app.domain.exceptions import PaymentNotFound
 from app.infra.broker import RETRY_EXCHANGE, retry_routing_key
+from app.settings import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -29,22 +32,26 @@ def decide(attempt: int, max_retries: int) -> int | None:
 
 
 class RetryMiddleware(BaseMiddleware):
-    """Подключается через `functools.partial(RetryMiddleware, broker=..., ...)`."""
+    """Подключается на router: `RabbitRouter(middlewares=[RetryMiddleware])`.
 
-    def __init__(
-        self,
-        msg: Any,
-        /,
-        *,
-        broker: RabbitBroker,
-        max_retries: int,
-        non_retryable: tuple[type[Exception], ...],
-        **kwargs: Any,
-    ) -> None:
-        super().__init__(msg, **kwargs)
-        self.broker = broker
-        self.max_retries = max_retries
-        self.non_retryable = non_retryable
+    Зависимости берёт из контекста FastStream, а не из глобальных объектов: брокер
+    кладёт туда себя сам (`"broker"`), настройки — `create_app` (`"settings"`). Поэтому
+    модульный router работает с любым брокером и настройками, в том числе в тестах.
+    """
+
+    # повтор не поможет: платежа нет / сообщение не того формата → сразу в DLQ
+    non_retryable: tuple[type[Exception], ...] = (PaymentNotFound, ValidationError)
+
+    @property
+    def broker(self) -> RabbitBroker:
+        return self.context.get("broker")
+
+    @property
+    def max_retries(self) -> int:
+        settings: Settings | None = self.context.get("settings")
+        if settings is None:
+            raise RuntimeError("Settings are not in FastStream context: use create_app()")
+        return settings.MAX_RETRIES
 
     async def consume_scope(self, call_next: Any, msg: StreamMessage[Any]) -> Any:
         try:

@@ -5,14 +5,13 @@
 """
 
 import logging
-from functools import partial
 from uuid import UUID
 
 from dishka import Provider
 from dishka_faststream import FromDishka, setup_dishka
-from faststream import AckPolicy, FastStream
+from faststream import AckPolicy, ContextRepo, FastStream
 from faststream.rabbit import RabbitRouter
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 
 from app.application.commands.charge_payment import ChargePaymentCommand
 from app.application.commands.complete_payment import CompletePaymentCommand
@@ -20,7 +19,6 @@ from app.application.commands.send_webhook import SendWebhookCommand
 from app.application.mediator import Mediator
 from app.application.queries.get_payment import GetPaymentQuery
 from app.consumer.retry import RetryMiddleware
-from app.domain.exceptions import PaymentNotFound
 from app.infra.broker import PAYMENTS_EXCHANGE, PAYMENTS_NEW_QUEUE, create_broker, declare_topology
 from app.infra.uow import UnitOfWork
 from app.ioc import make_container
@@ -28,14 +26,16 @@ from app.settings import Settings, get_settings
 
 logger = logging.getLogger(__name__)
 
-# повтор не поможет: платежа нет / сообщение не того формата → сразу в DLQ
-NON_RETRYABLE: tuple[type[Exception], ...] = (PaymentNotFound, ValidationError)
+# Router без зависимостей от окружения: брокер и настройки middleware берёт из контекста
+# FastStream, поэтому импорт модуля ничего не читает и не создаёт.
+router = RabbitRouter(middlewares=[RetryMiddleware])
 
 
 class PaymentCreatedMessage(BaseModel):
     payment_id: UUID
 
 
+@router.subscriber(PAYMENTS_NEW_QUEUE, PAYMENTS_EXCHANGE, ack_policy=AckPolicy.REJECT_ON_ERROR)
 async def process_payment(
     body: PaymentCreatedMessage,
     uow: FromDishka[UnitOfWork],
@@ -61,29 +61,16 @@ async def process_payment(
 
 
 def create_app(settings: Settings | None = None, *providers: Provider) -> FastStream:
-    """Фабрика: без side-effects при импорте; тесты передают свои settings и провайдеры."""
+    """Собирает приложение вокруг модульного router; тесты передают свои settings и провайдеры."""
     settings = settings or get_settings()
     # FastStream настраивает только свой логгер; без этого INFO приложения теряются
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+
     broker = create_broker(settings)
-
-    # router на каждый вызов: subscriber привязан к конкретному брокеру
-    router = RabbitRouter(
-        middlewares=[
-            partial(
-                RetryMiddleware,
-                broker=broker,
-                max_retries=settings.MAX_RETRIES,
-                non_retryable=NON_RETRYABLE,
-            )
-        ]
-    )
-    router.subscriber(PAYMENTS_NEW_QUEUE, PAYMENTS_EXCHANGE, ack_policy=AckPolicy.REJECT_ON_ERROR)(
-        process_payment
-    )
     broker.include_router(router)
+    # settings в контексте — для RetryMiddleware (брокер кладёт себя туда сам)
+    app = FastStream(broker, context=ContextRepo({"settings": settings}))
 
-    app = FastStream(broker)
     container = make_container(settings, *providers, broker=broker)
     # REQUEST-скоуп dishka = одно сообщение = одна сессия БД
     setup_dishka(container, app, auto_inject=True, finalize_container=True)
