@@ -1,16 +1,21 @@
 from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
+from decimal import Decimal
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 from alembic import command
 from alembic.config import Config
 from dishka import AsyncContainer, Provider, Scope, provide
+from faststream import TestApp
 from faststream.rabbit import RabbitBroker
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
+from app.consumer.main import create_app as create_consumer
+from app.domain.payment import Currency
 from app.infra.broker import (
     DEAD_LETTER_QUEUE,
     PAYMENTS_NEW_QUEUE,
@@ -147,14 +152,20 @@ def settings(db_url: str) -> Settings:
 
 
 @pytest.fixture
-async def broker(settings: Settings, rabbit_url: str) -> AsyncIterator[RabbitBroker]:
-    settings = settings.model_copy(update={"RABBIT_URL": rabbit_url})
-    broker = create_broker(settings)
+def rabbit_settings(settings: Settings, rabbit_url: str) -> Settings:
+    return settings.model_copy(update={"RABBIT_URL": rabbit_url})
+
+
+@pytest.fixture
+async def broker(rabbit_settings: Settings) -> AsyncIterator[RabbitBroker]:
+    """Брокер для публикации и проверки очередей; топология объявлена, очереди пусты."""
+    broker = create_broker(rabbit_settings)
     await broker.connect()
-    await declare_topology(broker, settings)
+    await declare_topology(broker, rabbit_settings)
     queues = [PAYMENTS_NEW_QUEUE, DEAD_LETTER_QUEUE]
     queues += [
-        retry_queue(n, settings.RETRY_BASE_DELAY) for n in range(1, settings.MAX_RETRIES + 1)
+        retry_queue(n, rabbit_settings.RETRY_BASE_DELAY)
+        for n in range(1, rabbit_settings.MAX_RETRIES + 1)
     ]
     for queue in queues:
         await (await broker.declare_queue(queue)).purge()
@@ -188,3 +199,36 @@ async def relay_container(
     container = make_container(settings, InstantGatewayProvider(), broker=broker)
     yield container
     await container.close()
+
+
+class CountingGateway(PaymentGateway):
+    """Мгновенный успешный шлюз, считающий вызовы — проверка «шлюз не вызван повторно»."""
+
+    def __init__(self) -> None:
+        super().__init__(success_rate=1.0, min_delay=0, max_delay=0)
+        self.calls: list[UUID] = []
+
+    async def charge(self, payment_id: UUID, amount: Decimal, currency: Currency) -> bool:
+        self.calls.append(payment_id)
+        return await super().charge(payment_id, amount, currency)
+
+
+class GatewayProvider(Provider):
+    def __init__(self, gateway: PaymentGateway) -> None:
+        super().__init__()
+        self._gateway = gateway
+
+    @provide(scope=Scope.APP, override=True)
+    def gateway(self) -> PaymentGateway:
+        return self._gateway
+
+
+@pytest.fixture
+async def consumer(
+    rabbit_settings: Settings, engine: AsyncEngine, broker: RabbitBroker
+) -> AsyncIterator[CountingGateway]:
+    """Запущенный consumer на настоящем RabbitMQ; `broker` — чтобы очереди были чистыми."""
+    gateway = CountingGateway()
+    app = create_consumer(rabbit_settings, GatewayProvider(gateway))
+    async with TestApp(app):
+        yield gateway
