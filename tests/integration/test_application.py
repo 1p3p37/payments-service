@@ -11,40 +11,15 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.application.commands.charge_payment import ChargePaymentCommand
 from app.application.commands.complete_payment import CompletePaymentCommand
-from app.application.commands.create_payment import CreatePaymentCommand
 from app.application.commands.send_webhook import SendWebhookCommand
 from app.application.mediator import Mediator
 from app.application.queries.get_payment import GetPaymentQuery
 from app.domain.exceptions import IdempotencyKeyConflict, PaymentNotFound
-from app.domain.payment import Currency, Payment, PaymentStatus
+from app.domain.payment import Payment, PaymentStatus
 from app.infra.models import OutboxModel, PaymentModel
 from app.infra.repositories.queries.payment import PaymentQueryRepository
 from app.infra.uow import UnitOfWork
-
-WEBHOOK_URL = "http://client.test/hook"
-
-
-def create_command(**overrides) -> CreatePaymentCommand:
-    params = {
-        "idempotency_key": "key-1",
-        "amount": Decimal("100.00"),
-        "currency": Currency.RUB,
-        "description": "Order #1",
-        "metadata": {"order_id": 1},
-        "webhook_url": WEBHOOK_URL,
-    } | overrides
-    return CreatePaymentCommand(**params)
-
-
-async def send(container: AsyncContainer, command):
-    """Как точка входа: свой скоуп и транзакция на каждый вызов."""
-    async with container() as request:
-        uow = await request.get(UnitOfWork)
-        mediator = await request.get(Mediator)
-        async with uow:
-            if isinstance(command, GetPaymentQuery):
-                return await mediator.query(command)
-            return await mediator.send(command)
+from tests.integration.helpers import WEBHOOK_URL, create_command, send
 
 
 async def counts(session_factory: async_sessionmaker[AsyncSession]) -> tuple[int, int]:
