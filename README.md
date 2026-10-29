@@ -4,7 +4,76 @@
 
 **Стек:** FastAPI · Pydantic v2 · SQLAlchemy 2 (async) · PostgreSQL · RabbitMQ (FastStream 0.7) · Alembic · dishka · Docker
 
-> Статус: домен, хранение, application-слой, топология RabbitMQ, outbox relay и consumer готовы и покрыты тестами. HTTP API и Docker-окружение — в работе; разделы «Запуск» и «Примеры» появятся вместе с ними.
+## Запуск
+
+```bash
+docker compose up --build -d
+docker compose ps          # migrate — Exited (0), остальные — running / healthy
+```
+
+| Сервис | Назначение | Снаружи |
+|---|---|---|
+| `postgres`, `rabbitmq` | хранилище и брокер | RabbitMQ UI — http://localhost:15672 (guest / guest) |
+| `migrate` | `alembic upgrade head`, one-shot; остальные стартуют после его успеха | — |
+| `api` | HTTP API, Swagger — http://localhost:8000/docs | `:8000` |
+| `consumer` | обработка `payments.new` | — |
+| `outbox-relay` | outbox → RabbitMQ | — |
+| `webhook-mock` | демо-получатель webhook'ов (не часть сервиса) | `:8001` |
+
+API-ключ по умолчанию — `dev-api-key` (переменная `API_KEY`). Порты меняются через `API_PORT`, `RABBITMQ_UI_PORT`, `WEBHOOK_MOCK_PORT`. Один образ на все сервисы, команды в exec-форме — `docker compose down` завершает процессы штатно за секунды.
+
+## Примеры
+
+Создать платёж (`webhook_url` — адрес mock'а внутри docker-сети):
+```bash
+curl -X POST localhost:8000/api/v1/payments \
+  -H 'X-API-Key: dev-api-key' -H 'Idempotency-Key: order-42' -H 'Content-Type: application/json' \
+  -d '{"amount":"100.50","currency":"RUB","description":"Order #42","metadata":{"order_id":42},"webhook_url":"http://webhook-mock:8001/hook"}'
+```
+```
+202 {"payment_id":"1a7a8ee2-c785-47a2-9fd3-9224124e8193","status":"pending","created_at":"2026-10-29T19:49:46.143151Z"}
+```
+
+| Запрос | Ответ |
+|---|---|
+| тот же запрос ещё раз | `202` — тот же `payment_id`, новой записи нет |
+| тот же `Idempotency-Key`, другая сумма | `409 {"detail":"Idempotency key 'order-42' was already used with a different request body"}` |
+| без `X-API-Key` | `401 {"detail":"Invalid or missing API key"}` |
+| `amount: "0"`, `currency: "GBP"`, `webhook_url: "nope"` | `422` с перечнем ошибок полей |
+| `GET` несуществующего платежа | `404 {"detail":"Payment … not found"}` |
+
+Через 2–5 с платёж обработан:
+```bash
+curl localhost:8000/api/v1/payments/1a7a8ee2-c785-47a2-9fd3-9224124e8193 -H 'X-API-Key: dev-api-key'
+```
+```json
+{"payment_id":"1a7a8ee2-…","amount":"100.50","currency":"RUB","description":"Order #42","metadata":{"order_id":42},
+ "status":"succeeded","idempotency_key":"order-42","webhook_url":"http://webhook-mock:8001/hook",
+ "created_at":"2026-10-29T19:49:46.143151Z","processed_at":"2026-10-29T19:49:48.864445Z"}
+```
+а `curl localhost:8001/received` показывает доставленный webhook с `X-Event-Id` = `payment_id`.
+
+### Retry и DLQ вживую
+
+```bash
+curl -X PUT localhost:8001/config -H 'Content-Type: application/json' -d '{"fail_rate":1}'   # webhook всегда 500
+# создать платёж, затем:
+docker compose logs -f consumer
+```
+```
+19:50:29.237 WARNING app.consumer.retry Processing failed, message 685fee34-… → retry 1/3
+19:50:30.270 WARNING app.consumer.retry Processing failed, message 685fee34-… → retry 2/3   (+1 с)
+19:50:32.330 WARNING app.consumer.retry Processing failed, message 685fee34-… → retry 3/3   (+2 с)
+19:50:36.355 ERROR   app.consumer.retry Retries exhausted (3), message 685fee34-… → DLQ  (+4 с)
+```
+Сообщение — в очереди `payments.new.dlq` (RabbitMQ UI → Queues). Вернуть: `-d '{"fail_rate":0}'`.
+
+### Масштабирование
+
+```bash
+docker compose up -d --scale consumer=3
+```
+Реплики делят очередь `payments.new`; конфликты при дублях закрывает optimistic lock. Проверено: 30 параллельных платежей распределились по трём consumer'ам, все обработаны, outbox пуст.
 
 ## Архитектура
 
@@ -39,6 +108,8 @@
 | `application/` | Команды и запросы (CQRS), хендлеры, минимальный медиатор |
 | `infra/` | ORM-модели, query/command-репозитории, UoW, топология RabbitMQ, шлюз, webhook-клиент |
 | `ioc.py` | DI-контейнер (dishka) — одна сборка для API, consumer, relay и тестов |
+| `api/` | FastAPI: роуты, схемы, проверка `X-API-Key`, маппинг доменных ошибок в HTTP |
+| `consumer/` | FastStream-подписчик и retry-middleware |
 | `manage.py` | CLI: `runoutbox` |
 
 ### Поток платежа
@@ -157,7 +228,8 @@ python -m app.manage runoutbox
 ```bash
 uv sync
 uv run ruff check . && uv run ruff format --check .
-uv run pytest -m "not e2e"
+uv run pytest                 # unit + integration; e2e пропускаются, если стек не поднят
+docker compose up -d && uv run pytest -m e2e    # e2e на поднятом окружении
 ```
 
 Integration-тесты поднимают **PostgreSQL и RabbitMQ в testcontainers** (нужен Docker) и применяют настоящие миграции. Retry-задержки и DLQ проверяются на реальном брокере: `TestRabbitBroker` не эмулирует TTL и dead-lettering.
@@ -166,4 +238,5 @@ Integration-тесты поднимают **PostgreSQL и RabbitMQ в testcontai
 |---|---|
 | unit | правила домена, медиатор, шлюз, webhook-клиент, параметры retry-очередей |
 | integration | репозитории и optimistic lock, атомарность UoW, миграции = модели, идемпотентность и гонки создания, конфликт параллельных consumer'ов, TTL → возврат в очередь, reject → DLQ, outbox: persistent-публикация, карантин poison-сообщений, поведение при недоступном брокере; consumer по полному пути create → outbox → relay → очередь: успех, сбой webhook → retry, исчерпание → DLQ с задержками 1/2/4·base, неизвестный платёж и битое тело → DLQ без повторов, повторная доставка без второго списания |
-| e2e (`-m e2e`) | полный путь на docker compose — появится вместе с ним |
+| integration: API | 401 (нет / неверный ключ, раньше валидации), 202, повтор → тот же ответ, 409, 5 одновременных POST → одна запись, 422 на невалидное тело и отсутствующий `Idempotency-Key`, GET 200 / 404 / 422 |
+| e2e (`-m e2e`) | на docker compose: POST → `succeeded/failed` → webhook-mock получил уведомление; webhook всегда 500 → сообщение в `payments.new.dlq` (management API) |
