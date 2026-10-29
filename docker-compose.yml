@@ -6,12 +6,18 @@ x-app: &app
     DB_URL: postgresql+asyncpg://payments:payments@postgres:5432/payments
     RABBIT_URL: amqp://guest:guest@rabbitmq:5672/
     API_KEY: ${API_KEY:-dev-api-key}
+    API_DOCS_ENABLED: ${API_DOCS_ENABLED:-true}
     MAX_RETRIES: ${MAX_RETRIES:-3}
     RETRY_BASE_DELAY: ${RETRY_BASE_DELAY:-1}
     GATEWAY_SUCCESS_RATE: ${GATEWAY_SUCCESS_RATE:-0.9}
     GATEWAY_MIN_DELAY: ${GATEWAY_MIN_DELAY:-2}
     GATEWAY_MAX_DELAY: ${GATEWAY_MAX_DELAY:-5}
     WEBHOOK_TIMEOUT: ${WEBHOOK_TIMEOUT:-5}
+    OUTBOX_BATCH_SIZE: ${OUTBOX_BATCH_SIZE:-1000}
+    OUTBOX_PUBLISH_CONCURRENCY: ${OUTBOX_PUBLISH_CONCURRENCY:-100}
+    OUTBOX_MAX_ATTEMPTS: ${OUTBOX_MAX_ATTEMPTS:-5}
+    OUTBOX_POLL_INTERVAL: ${OUTBOX_POLL_INTERVAL:-0.5}
+    OUTBOX_SHUTDOWN_TIMEOUT: ${OUTBOX_SHUTDOWN_TIMEOUT:-30}
   depends_on: &app-deps
     postgres:
       condition: service_healthy
@@ -62,7 +68,7 @@ services:
     ports:
       - "${API_PORT:-8000}:8000"
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      test: ["CMD", "python", "-c", "import os, urllib.request as u; u.urlopen(u.Request('http://localhost:8000/health', headers={'X-API-Key': os.environ['API_KEY']}))"]
       interval: 3s
       timeout: 3s
       retries: 20

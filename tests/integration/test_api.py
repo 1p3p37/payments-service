@@ -62,12 +62,33 @@ class TestAuth:
 
         assert response.status_code == 401
 
-    async def test_health_without_key(self, client: httpx.AsyncClient):
+    async def test_every_endpoint_requires_key(self, client: httpx.AsyncClient):
+        """ТЗ: X-API-Key для всех эндпоинтов — включая служебный /health."""
+        assert (await client.get("/health")).status_code == 200
         del client.headers["X-API-Key"]
 
-        response = await client.get("/health")
+        assert (await client.get("/health")).status_code == 401
 
-        assert response.status_code == 200
+    async def test_docs_open_but_every_operation_requires_key(self, client: httpx.AsyncClient):
+        """Swagger открыт (браузер не шлёт заголовок при загрузке схемы), а все операции
+        в схеме требуют X-API-Key — Swagger подставит его после Authorize."""
+        del client.headers["X-API-Key"]
+
+        docs = await client.get("/docs")
+        schema = (await client.get("/openapi.json")).json()
+
+        assert docs.status_code == 200
+        assert "APIKeyHeader" in schema["components"]["securitySchemes"]
+        operations = [op for path in schema["paths"].values() for op in path.values()]
+        assert operations
+        assert all(op["security"] == [{"APIKeyHeader": []}] for op in operations)
+
+    async def test_docs_can_be_disabled(self, settings: Settings, engine: AsyncEngine):
+        app = create_app(settings.model_copy(update={"API_DOCS_ENABLED": False}))
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            for path in ("/docs", "/openapi.json"):
+                assert (await client.get(path)).status_code == 404
 
 
 class TestCreatePayment:

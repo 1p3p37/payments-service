@@ -5,10 +5,12 @@ from contextlib import asynccontextmanager
 
 from dishka import Provider
 from dishka.integrations.fastapi import setup_dishka
-from fastapi import FastAPI, Request, status
+from fastapi import Depends, FastAPI, Request, status
 from fastapi.responses import JSONResponse
 
+from app.api.auth import verify_api_key
 from app.api.routes import router
+from app.api.schemas import ErrorResponse
 from app.domain.exceptions import IdempotencyKeyConflict, InvalidPaymentAmount, PaymentNotFound
 from app.ioc import make_container
 from app.settings import Settings, get_settings
@@ -30,7 +32,18 @@ def create_app(settings: Settings | None = None, *providers: Provider) -> FastAP
         yield
         await container.close()
 
-    app = FastAPI(title="Payments Service", version="1.0.0", lifespan=lifespan)
+    docs = settings.API_DOCS_ENABLED
+    app = FastAPI(
+        title="Payments Service",
+        version="1.0.0",
+        lifespan=lifespan,
+        # X-API-Key на всех эндпоинтах приложения, включая /health
+        dependencies=[Depends(verify_api_key)],
+        responses={401: {"model": ErrorResponse}},
+        docs_url="/docs" if docs else None,
+        redoc_url=None,
+        openapi_url="/openapi.json" if docs else None,
+    )
     app.state.settings = settings
     app.include_router(router)
     setup_dishka(container, app)
@@ -43,7 +56,6 @@ def create_app(settings: Settings | None = None, *providers: Provider) -> FastAP
 
     @app.get("/health", tags=["service"])
     async def health() -> dict[str, str]:
-        """Без X-API-Key: используется healthcheck'ом docker compose."""
         return {"status": "ok"}
 
     return app

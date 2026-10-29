@@ -9,6 +9,9 @@ class Settings(BaseSettings):
     DB_URL: str = "postgresql+asyncpg://payments:payments@localhost:5432/payments"
     RABBIT_URL: str = "amqp://guest:guest@localhost:5672/"
     API_KEY: str = "dev-api-key"
+    # Swagger/OpenAPI открыты без ключа (браузер не шлёт заголовок при загрузке схемы),
+    # но запросы из Swagger к API — только с ключом через Authorize. В проде — выключить
+    API_DOCS_ENABLED: bool = True
 
     MAX_RETRIES: int = 3
     RETRY_BASE_DELAY: float = 1  # секунды, задержка попытки n = base * 2^(n-1)

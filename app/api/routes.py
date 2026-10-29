@@ -2,9 +2,8 @@ from typing import Annotated
 from uuid import UUID
 
 from dishka.integrations.fastapi import DishkaRoute, FromDishka
-from fastapi import APIRouter, Depends, Header, status
+from fastapi import APIRouter, Header, status
 
-from app.api.auth import verify_api_key
 from app.api.schemas import (
     CreatePaymentRequest,
     CreatePaymentResponse,
@@ -19,9 +18,7 @@ from app.infra.uow import UnitOfWork
 router = APIRouter(
     prefix="/api/v1/payments",
     tags=["payments"],
-    route_class=DishkaRoute,
-    dependencies=[Depends(verify_api_key)],
-    responses={401: {"model": ErrorResponse}},
+    route_class=DishkaRoute,  # X-API-Key проверяется на уровне приложения (app/api/main.py)
 )
 
 

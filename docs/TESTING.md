@@ -39,7 +39,7 @@ docker compose up -d && uv run pytest -m e2e
 | `integration/test_topology.py` | TTL → возврат в `payments.new`, reject → DLQ, повторный declare |
 | `integration/test_outbox_relay.py` | persistent-публикация и удаление, poison → карантин без блокировки, брокер недоступен → `attempts` не растёт, остановка по сигналу |
 | `integration/test_consumer.py` | полный путь create → outbox → relay → очередь: успех, webhook падает 1 раз / всегда (задержки и DLQ с `x-retry-count=3`), неизвестный платёж и битое тело → DLQ без retry, повторная доставка без второго списания |
-| `integration/test_api.py` | 401 раньше 422, 202, повтор, 409, гонка, 422 на невалидное тело, GET 200 / 404 / 422 |
+| `integration/test_api.py` | ключ на всех эндпоинтах (включая `/health`), 401 раньше 422, Swagger открыт, но все операции в схеме требуют ключ, выключение флагом, 202, повтор, 409, гонка, 422 на невалидное тело, GET 200 / 404 / 422 |
 | `e2e/test_flow.py` | POST → `succeeded/failed` → webhook-mock получил уведомление; webhook всегда 500 → сообщение в DLQ |
 
 ### Инфраструктура тестов
@@ -63,7 +63,7 @@ docker compose up --build -d
 docker compose ps        # migrate — Exited (0); api, postgres, rabbitmq — healthy
 ```
 
-Адреса: API — `http://localhost:8000` (Swagger `/docs`), webhook-mock — `http://localhost:8001`, RabbitMQ UI — `http://localhost:15672` (guest / guest). Ключ — `dev-api-key`.
+Адреса: API — `http://localhost:8000` (Swagger `/docs` открывается без ключа; для запросов из него — **Authorize** → `dev-api-key`, иначе ручки ответят 401), webhook-mock — `http://localhost:8001`, RabbitMQ UI — `http://localhost:15672` (guest / guest). Ключ — `dev-api-key`.
 
 **Postman:** переменные `base_url = http://localhost:8000`, `api_key = dev-api-key`; заголовок `X-API-Key: {{api_key}}` на коллекцию; в Tests запроса создания — `pm.collectionVariables.set("payment_id", pm.response.json().payment_id)`.
 
@@ -73,7 +73,7 @@ docker compose ps        # migrate — Exited (0); api, postgres, rabbitmq — h
 
 | # | Запрос | Ожидается |
 |---|---|---|
-| 1 | `GET /health` без ключа | `200 {"status":"ok"}` |
+| 1 | `GET /health` с ключом / без ключа | `200 {"status":"ok"}` / `401` — ключ нужен на всех эндпоинтах |
 | 2 | создать платёж (ниже) | `202 {payment_id, status:"pending", created_at}` |
 | 3 | повторить п. 2 без изменений | `202`, тот же `payment_id` и `created_at` |
 | 4 | п. 2 с тем же ключом и `"amount":"999.00"` | `409 already used with a different request body` |
